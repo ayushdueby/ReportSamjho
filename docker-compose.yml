@@ -2,15 +2,16 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev    # production uses Dockerfile (multi-stage)
     ports:
       - "5001:5001"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
+      - ALLOWED_ORIGINS=http://localhost:3000
     volumes:
-      - ./backend/src:/app/src   # hot reload: edits reflect without rebuild
+      - ./backend/src:/app/src
     restart: on-failure
 
   frontend:
@@ -21,9 +22,9 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:5001
-      - WDS_SOCKET_PORT=0          # fixes WebSocket hot-reload behind Docker
+      - WDS_SOCKET_PORT=0
     volumes:
-      - ./frontend/src:/app/src   # hot reload: edits reflect without rebuild
+      - ./frontend/src:/app/src
     depends_on:
       - backend
-    stdin_open: true               # keeps CRA dev server alive
+    stdin_open: true

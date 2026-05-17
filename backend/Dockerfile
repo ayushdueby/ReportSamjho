@@ -1,14 +1,14 @@
-FROM maven:3.9-eclipse-temurin-21 AS dev
-
+# ── Build stage ──────────────────────────────────────────────────────────────
+FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
-
-# Cache dependencies first
 COPY pom.xml .
 RUN mvn dependency:go-offline -q
-
-# Copy source
 COPY src ./src
+RUN mvn package -DskipTests -q
 
-EXPOSE 5001
-
-CMD ["mvn", "spring-boot:run"]
+# ── Runtime stage (small JRE image) ──────────────────────────────────────────
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+COPY --from=build /app/target/report-samjho-backend-*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
