@@ -65,9 +65,16 @@ public class ClaudeService {
             "bengali", "Bengali (বাংলা)"
     );
 
+    // 6000 TPM free-tier budget: ~120 sys + ~30 prefix + report + 1500 output.
+    // Keep report text under 2000 chars (~500 tokens) to stay comfortably within limit.
+    private static final int MAX_REPORT_CHARS = 2000;
+
     private String buildUserPrompt(String reportText, String language) {
         String langName = LANG_NAMES.getOrDefault(language, "English");
-        return "Language: " + langName + ". Analyse this report and return JSON only.\n\n" + reportText;
+        String truncated = reportText.length() > MAX_REPORT_CHARS
+                ? reportText.substring(0, MAX_REPORT_CHARS)
+                : reportText;
+        return "Language: " + langName + ". Analyse this report and return JSON only.\n\n" + truncated;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -103,7 +110,7 @@ public class ClaudeService {
     private ObjectNode buildOpenAIRequest(String model, String systemPrompt, String userText) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
-        body.put("max_tokens", 4096);
+        body.put("max_tokens", 1500);
         body.put("temperature", 0.3);
 
         ArrayNode messages = body.putArray("messages");
@@ -122,7 +129,7 @@ public class ClaudeService {
     private ObjectNode buildVisionRequest(String model, String systemPrompt, String imageDataUrl, String language) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
-        body.put("max_tokens", 4096);
+        body.put("max_tokens", 1500);
         body.put("temperature", 0.3);
 
         ArrayNode messages = body.putArray("messages");
