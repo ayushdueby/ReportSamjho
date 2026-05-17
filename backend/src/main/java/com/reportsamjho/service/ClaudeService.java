@@ -211,37 +211,43 @@ public class ClaudeService {
 
     // ── JSON repair ───────────────────────────────────────────────────────────
 
-    // Closes any unclosed strings/arrays/objects left by a truncated response.
+    // Finds the last fully-closed finding object and reconstructs valid JSON from it.
+    // The expected structure is: {"overall_summary":"...","findings":[{...},{...}],"doctor_questions_summary":"..."}
+    // depth map: root { = 1, findings [ = 2, finding { = 3 → closes back to 2
     private String repairTruncatedJson(String json) {
-        // Drop the last incomplete token (partial string or bare value)
-        String trimmed = json.stripTrailing();
-
-        // If we're mid-string, close it
-        long quotes = trimmed.chars().filter(c -> c == '"').count();
-        if (quotes % 2 != 0) trimmed = trimmed + "\"";
-
-        // Count unclosed brackets
-        StringBuilder closers = new StringBuilder();
-        int objects = 0, arrays = 0;
+        int lastGoodClose = -1;
         boolean inString = false;
-        for (int i = 0; i < trimmed.length(); i++) {
-            char c = trimmed.charAt(i);
-            if (c == '"' && (i == 0 || trimmed.charAt(i - 1) != '\\')) inString = !inString;
+        int depth = 0;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            if (c == '"') {
+                // Count preceding backslashes to detect escaped quote
+                int backslashes = 0;
+                for (int j = i - 1; j >= 0 && json.charAt(j) == '\\'; j--) backslashes++;
+                if (backslashes % 2 == 0) inString = !inString;
+            }
+
             if (!inString) {
-                if (c == '{') objects++;
-                else if (c == '}') objects--;
-                else if (c == '[') arrays++;
-                else if (c == ']') arrays--;
+                if (c == '{' || c == '[') depth++;
+                else if (c == '}' || c == ']') {
+                    depth--;
+                    if (depth == 2 && c == '}') lastGoodClose = i; // closed a finding object
+                }
             }
         }
 
-        // Strip trailing comma before we close
-        trimmed = trimmed.replaceAll(",\\s*$", "");
+        if (lastGoodClose == -1) {
+            log.warn("No complete finding found in truncated response, returning empty result");
+            return "{\"overall_summary\":\"Report partially parsed — please try again.\","
+                    + "\"findings\":[],"
+                    + "\"doctor_questions_summary\":\"\"}";
+        }
 
-        for (int i = 0; i < arrays; i++)  closers.append("]");
-        for (int i = 0; i < objects; i++) closers.append("}");
-
-        return trimmed + closers;
+        String good = json.substring(0, lastGoodClose + 1).stripTrailing()
+                         .replaceAll(",\\s*$", "");
+        return good + "],\"doctor_questions_summary\":\"\"}";
     }
 
     // ── PDF helper ────────────────────────────────────────────────────────────
