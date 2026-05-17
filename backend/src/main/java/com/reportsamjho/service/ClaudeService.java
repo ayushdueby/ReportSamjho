@@ -110,7 +110,7 @@ public class ClaudeService {
     private ObjectNode buildOpenAIRequest(String model, String systemPrompt, String userText) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
-        body.put("max_tokens", 1500);
+        body.put("max_tokens", 2500);
         body.put("temperature", 0.3);
 
         ArrayNode messages = body.putArray("messages");
@@ -129,7 +129,7 @@ public class ClaudeService {
     private ObjectNode buildVisionRequest(String model, String systemPrompt, String imageDataUrl, String language) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
-        body.put("max_tokens", 1500);
+        body.put("max_tokens", 2500);
         body.put("temperature", 0.3);
 
         ArrayNode messages = body.putArray("messages");
@@ -185,7 +185,14 @@ public class ClaudeService {
                     .replaceAll("(?s)^```\\s*", "")
                     .replaceAll("\\s*```$", "");
 
-            return mapper.readTree(jsonText);
+            try {
+                return mapper.readTree(jsonText);
+            } catch (Exception parseEx) {
+                // Response was truncated — try to close open brackets so we get partial data
+                log.warn("JSON truncated, attempting repair. Error: {}", parseEx.getMessage());
+                String repaired = repairTruncatedJson(jsonText);
+                return mapper.readTree(repaired);
+            }
 
         } catch (HttpClientErrorException e) {
             int status = e.getStatusCode().value();
@@ -200,6 +207,41 @@ public class ClaudeService {
         } catch (Exception e) {
             throw new RuntimeException("PARSE_ERROR: " + e.getMessage(), e);
         }
+    }
+
+    // ── JSON repair ───────────────────────────────────────────────────────────
+
+    // Closes any unclosed strings/arrays/objects left by a truncated response.
+    private String repairTruncatedJson(String json) {
+        // Drop the last incomplete token (partial string or bare value)
+        String trimmed = json.stripTrailing();
+
+        // If we're mid-string, close it
+        long quotes = trimmed.chars().filter(c -> c == '"').count();
+        if (quotes % 2 != 0) trimmed = trimmed + "\"";
+
+        // Count unclosed brackets
+        StringBuilder closers = new StringBuilder();
+        int objects = 0, arrays = 0;
+        boolean inString = false;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (c == '"' && (i == 0 || trimmed.charAt(i - 1) != '\\')) inString = !inString;
+            if (!inString) {
+                if (c == '{') objects++;
+                else if (c == '}') objects--;
+                else if (c == '[') arrays++;
+                else if (c == ']') arrays--;
+            }
+        }
+
+        // Strip trailing comma before we close
+        trimmed = trimmed.replaceAll(",\\s*$", "");
+
+        for (int i = 0; i < arrays; i++)  closers.append("]");
+        for (int i = 0; i < objects; i++) closers.append("}");
+
+        return trimmed + closers;
     }
 
     // ── PDF helper ────────────────────────────────────────────────────────────
