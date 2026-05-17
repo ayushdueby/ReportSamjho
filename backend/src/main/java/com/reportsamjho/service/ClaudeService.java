@@ -4,16 +4,19 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Base64;
 import java.util.Map;
 
@@ -23,14 +26,17 @@ public class ClaudeService {
     private static final Logger log = LoggerFactory.getLogger(ClaudeService.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    @Value("${anthropic.api.key}")
+    @Value("${groq.api.key}")
     private String apiKey;
 
-    @Value("${anthropic.api.url}")
+    @Value("${groq.api.url}")
     private String apiUrl;
 
-    @Value("${anthropic.model}")
-    private String model;
+    @Value("${groq.model.text}")
+    private String textModel;
+
+    @Value("${groq.model.vision}")
+    private String visionModel;
 
     private static final String SYSTEM_PROMPT = """
             You are ReportSamjho, a friendly and calm medical report educator for Indian users. Your job is to explain medical lab report values in simple, reassuring language that a Class 8 student can understand.
@@ -52,7 +58,7 @@ public class ClaudeService {
                   "parameter_name_local": "Parameter name in selected language",
                   "value": "numeric or text value",
                   "unit": "unit of measurement",
-                  "reference_range": "normal range as string e.g. '4.0–11.0'",
+                  "reference_range": "normal range as string e.g. '4.0-11.0'",
                   "status": "normal | slightly_high | high | slightly_low | low",
                   "explanation": "2-3 sentence plain explanation in selected language, no jargon",
                   "lifestyle_tips": ["tip 1 in selected language", "tip 2", "tip 3"],
@@ -73,149 +79,156 @@ public class ClaudeService {
             """;
 
     private static final Map<String, String> LANG_NAMES = Map.of(
-            "hindi", "Hindi (हिंदी)",
+            "hindi",   "Hindi (हिंदी)",
             "english", "English",
-            "tamil", "Tamil (தமிழ்)",
-            "telugu", "Telugu (తెలుగు)",
+            "tamil",   "Tamil (தமிழ்)",
+            "telugu",  "Telugu (తెలుగు)",
             "bengali", "Bengali (বাংলা)"
     );
 
     private String buildUserPrompt(String reportText, String language) {
         String langName = LANG_NAMES.getOrDefault(language, "English");
-        return """
-                Please analyze this medical report and explain it in %s.
-
-                REPORT TEXT:
-                %s
-
-                Instructions:
-                - Selected language for all explanations: %s
-                - Extract ALL values/parameters from the report
-                - For each parameter, classify status, explain simply, give Indian-context tips if abnormal
-                - Overall summary must be in %s
-                - Return ONLY the JSON object, no other text
-                """.formatted(langName, reportText, langName, langName);
+        return "Please analyze this medical report and explain it in " + langName + ".\n\n"
+                + "REPORT TEXT:\n" + reportText + "\n\n"
+                + "Instructions:\n"
+                + "- Selected language for all explanations: " + langName + "\n"
+                + "- Extract ALL values/parameters from the report\n"
+                + "- For each parameter, classify status, explain simply, give Indian-context tips if abnormal\n"
+                + "- Overall summary must be in " + langName + "\n"
+                + "- Return ONLY the JSON object, no other text";
     }
 
+    // ── Public API ────────────────────────────────────────────────────────────
+
     public JsonNode analyseText(String reportText, String language) {
-        ObjectNode requestBody = buildTextRequest(reportText, language);
-        return callClaude(requestBody);
+        ObjectNode body = buildOpenAIRequest(textModel, SYSTEM_PROMPT, buildUserPrompt(reportText, language));
+        return callGroq(body);
     }
 
     public JsonNode analyseFile(MultipartFile file, String language) {
         String mimeType = file.getContentType();
         try {
-            byte[] bytes = file.getBytes();
-            String base64 = Base64.getEncoder().encodeToString(bytes);
-            ObjectNode requestBody = buildFileRequest(base64, mimeType, language);
-            return callClaude(requestBody);
-        } catch (Exception e) {
+            if ("application/pdf".equals(mimeType)) {
+                // Extract text from PDF, then treat as text analysis
+                String pdfText = extractPdfText(file);
+                if (pdfText.isBlank()) throw new RuntimeException("PARSE_ERROR: PDF text extraction returned empty");
+                ObjectNode body = buildOpenAIRequest(textModel, SYSTEM_PROMPT, buildUserPrompt(pdfText, language));
+                return callGroq(body);
+            } else {
+                // Image — use vision model
+                String base64 = Base64.getEncoder().encodeToString(file.getBytes());
+                String dataUrl = "data:" + mimeType + ";base64," + base64;
+                ObjectNode body = buildVisionRequest(visionModel, SYSTEM_PROMPT, dataUrl, language);
+                return callGroq(body);
+            }
+        } catch (IOException e) {
             throw new RuntimeException("FILE_READ_ERROR: " + e.getMessage(), e);
         }
     }
 
-    private ObjectNode buildTextRequest(String reportText, String language) {
+    // ── Request builders ──────────────────────────────────────────────────────
+
+    private ObjectNode buildOpenAIRequest(String model, String systemPrompt, String userText) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
         body.put("max_tokens", 4096);
-        body.put("system", SYSTEM_PROMPT);
+        body.put("temperature", 0.3);
 
         ArrayNode messages = body.putArray("messages");
-        ObjectNode msg = messages.addObject();
-        msg.put("role", "user");
 
-        ArrayNode content = msg.putArray("content");
-        ObjectNode textBlock = content.addObject();
-        textBlock.put("type", "text");
-        textBlock.put("text", buildUserPrompt(reportText, language));
+        ObjectNode sys = messages.addObject();
+        sys.put("role", "system");
+        sys.put("content", systemPrompt);
+
+        ObjectNode user = messages.addObject();
+        user.put("role", "user");
+        user.put("content", userText);
 
         return body;
     }
 
-    private ObjectNode buildFileRequest(String base64Data, String mimeType, String language) {
+    private ObjectNode buildVisionRequest(String model, String systemPrompt, String imageDataUrl, String language) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
         body.put("max_tokens", 4096);
-        body.put("system", SYSTEM_PROMPT);
+        body.put("temperature", 0.3);
 
         ArrayNode messages = body.putArray("messages");
-        ObjectNode msg = messages.addObject();
-        msg.put("role", "user");
 
-        ArrayNode content = msg.putArray("content");
+        ObjectNode sys = messages.addObject();
+        sys.put("role", "system");
+        sys.put("content", systemPrompt);
 
-        if ("application/pdf".equals(mimeType)) {
-            // Claude document block for PDFs
-            ObjectNode docBlock = content.addObject();
-            docBlock.put("type", "document");
-            ObjectNode source = docBlock.putObject("source");
-            source.put("type", "base64");
-            source.put("media_type", "application/pdf");
-            source.put("data", base64Data);
-        } else {
-            // Image block for JPG/PNG/WebP
-            ObjectNode imgBlock = content.addObject();
-            imgBlock.put("type", "image");
-            ObjectNode source = imgBlock.putObject("source");
-            source.put("type", "base64");
-            source.put("media_type", mimeType != null ? mimeType : "image/jpeg");
-            source.put("data", base64Data);
-        }
+        ObjectNode user = messages.addObject();
+        user.put("role", "user");
+        ArrayNode content = user.putArray("content");
 
-        // Text instruction block
+        ObjectNode imgBlock = content.addObject();
+        imgBlock.put("type", "image_url");
+        imgBlock.putObject("image_url").put("url", imageDataUrl);
+
         ObjectNode textBlock = content.addObject();
         textBlock.put("type", "text");
-        textBlock.put("text", buildUserPrompt(
-                "(see the uploaded file above — extract all lab values from it)", language));
+        textBlock.put("text", buildUserPrompt("(see the uploaded image — extract all lab values visible in it)", language));
 
         return body;
     }
 
-    private JsonNode callClaude(ObjectNode requestBody) {
+    // ── HTTP call ─────────────────────────────────────────────────────────────
+
+    private JsonNode callGroq(ObjectNode requestBody) {
         RestTemplate restTemplate = new RestTemplate();
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("x-api-key", apiKey);
-        headers.set("anthropic-version", "2023-06-01");
-        headers.set("anthropic-beta", "pdfs-2024-09-25");
+        headers.setBearerAuth(apiKey);
 
-        HttpEntity<String> entity;
+        String bodyStr;
         try {
-            entity = new HttpEntity<>(mapper.writeValueAsString(requestBody), headers);
+            bodyStr = mapper.writeValueAsString(requestBody);
         } catch (Exception e) {
             throw new RuntimeException("REQUEST_BUILD_ERROR", e);
         }
 
+        HttpEntity<String> entity = new HttpEntity<>(bodyStr, headers);
+
         try {
             ResponseEntity<String> response = restTemplate.postForEntity(apiUrl, entity, String.class);
-            JsonNode responseNode = mapper.readTree(response.getBody());
+            JsonNode root = mapper.readTree(response.getBody());
 
-            // Extract text from Claude response: content[0].text
-            String rawText = responseNode.path("content").get(0).path("text").asText().trim();
+            // OpenAI-compatible response: choices[0].message.content
+            String rawText = root.path("choices").get(0)
+                    .path("message").path("content").asText().trim();
 
             // Strip accidental markdown fences
             String jsonText = rawText
-                    .replaceAll("(?i)^```json\\s*", "")
-                    .replaceAll("(?i)^```\\s*", "")
+                    .replaceAll("(?s)^```json\\s*", "")
+                    .replaceAll("(?s)^```\\s*", "")
                     .replaceAll("\\s*```$", "");
 
             return mapper.readTree(jsonText);
 
         } catch (HttpClientErrorException e) {
             int status = e.getStatusCode().value();
-            log.error("Claude API HTTP error {}: {}", status, e.getResponseBodyAsString());
+            log.error("Groq API HTTP {}: {}", status, e.getResponseBodyAsString());
             if (status == 401) throw new RuntimeException("AUTH_ERROR");
             if (status == 429) throw new RuntimeException("RATE_LIMIT");
             throw new RuntimeException("API_ERROR: " + e.getMessage());
         } catch (RuntimeException e) {
-            log.error("Claude API error: {}", e.getMessage());
             String msg = e.getMessage();
             if (msg != null && (msg.startsWith("AUTH_ERROR") || msg.startsWith("RATE_LIMIT"))) throw e;
             throw new RuntimeException("PARSE_ERROR: " + msg, e);
         } catch (Exception e) {
-            log.error("Claude API unexpected error: {}", e.getMessage());
             throw new RuntimeException("PARSE_ERROR: " + e.getMessage(), e);
+        }
+    }
+
+    // ── PDF helper ────────────────────────────────────────────────────────────
+
+    private String extractPdfText(MultipartFile file) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(file.getBytes())) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            return stripper.getText(doc).trim();
         }
     }
 }
