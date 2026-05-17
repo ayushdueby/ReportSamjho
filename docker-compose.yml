@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./backend/src:/app/src   # hot reload: edits reflect without rebuild
+    restart: on-failure
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5001
+      - WDS_SOCKET_PORT=0          # fixes WebSocket hot-reload behind Docker
+    volumes:
+      - ./frontend/src:/app/src   # hot reload: edits reflect without rebuild
+    depends_on:
+      - backend
+    stdin_open: true               # keeps CRA dev server alive
