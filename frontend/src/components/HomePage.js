@@ -1,6 +1,6 @@
 import LanguageSelector from './LanguageSelector';
 
-export default function HomePage({ language, setLanguage, onUpload, onType }) {
+export default function HomePage({ language, setLanguage, onUpload, onType, usage }) {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Hero */}
@@ -54,6 +54,25 @@ export default function HomePage({ language, setLanguage, onUpload, onType }) {
             Type Values Manually
           </button>
         </div>
+
+        {/* Usage badge */}
+        {usage && (
+          <div className={`mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
+            usage.paid
+              ? 'bg-[#e8f7f3] text-[#1D9E75]'
+              : usage.remaining === 0
+              ? 'bg-red-50 text-red-600'
+              : 'bg-amber-50 text-amber-700'
+          }`}>
+            {usage.paid ? (
+              <><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg> Unlimited access</>
+            ) : usage.remaining === 0 ? (
+              <><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd"/></svg> Free limit reached — Unlock for ₹99</>
+            ) : (
+              <><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/></svg> {usage.remaining} free {usage.remaining === 1 ? 'analysis' : 'analyses'} left</>
+            )}
+          </div>
+        )}
 
         {/* Trust signals */}
         <div className="mt-10 flex flex-wrap justify-center gap-4 text-xs text-gray-400">

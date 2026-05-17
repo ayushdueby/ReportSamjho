@@ -103,6 +103,12 @@ public class ReportController {
                     .body(new ApiErrorResponse("PARSE_ERROR",
                             "Hum is report ko samajh nahi paaye — kya aap values manually type kar sakte hain?"));
         }
+        if (msg.startsWith("PDF_TOO_LONG")) {
+            String pages = msg.contains(":") ? msg.split(":")[1] : "?";
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiErrorResponse("PDF_TOO_LONG",
+                            "Yeh PDF " + pages + " pages ka hai. Sirf 3 pages tak ki reports allowed hain."));
+        }
         if (msg.startsWith("FILE_READ_ERROR")) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new ApiErrorResponse("FILE_READ_ERROR", "File padne mein problem aayi. Please retry."));

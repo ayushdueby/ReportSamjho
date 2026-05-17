@@ -43,10 +43,11 @@ const STATUS_CONFIG = {
   },
 };
 
-export default function FindingCard({ finding }) {
+export default function FindingCard({ finding, forceExpanded }) {
   const [expanded, setExpanded] = useState(finding.status !== 'normal');
   const cfg = STATUS_CONFIG[finding.status] || STATUS_CONFIG.normal;
   const isAbnormal = finding.status !== 'normal';
+  const isOpen = forceExpanded !== null && forceExpanded !== undefined ? forceExpanded : expanded;
 
   return (
     <div className={`bg-white rounded-2xl shadow-sm border-l-4 ${cfg.border} overflow-hidden`}>
@@ -90,7 +91,7 @@ export default function FindingCard({ finding }) {
             </span>
             {/* Expand chevron */}
             <svg
-              className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
               fill="none" stroke="currentColor" viewBox="0 0 24 24"
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -100,7 +101,7 @@ export default function FindingCard({ finding }) {
       </button>
 
       {/* Expanded content */}
-      {expanded && (
+      {isOpen && (
         <div className="px-5 pb-5 space-y-4 border-t border-gray-50">
           {/* Explanation */}
           {finding.explanation && (

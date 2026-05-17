@@ -254,6 +254,8 @@ public class ClaudeService {
 
     private String extractPdfText(MultipartFile file) throws IOException {
         try (PDDocument doc = Loader.loadPDF(file.getBytes())) {
+            int pages = doc.getNumberOfPages();
+            if (pages > 3) throw new RuntimeException("PDF_TOO_LONG:" + pages);
             PDFTextStripper stripper = new PDFTextStripper();
             return stripper.getText(doc).trim();
         }

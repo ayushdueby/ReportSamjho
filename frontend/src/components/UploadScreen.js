@@ -5,7 +5,7 @@ import LanguageSelector from './LanguageSelector';
 
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
-export default function UploadScreen({ mode, language, setLanguage, onResults, onBack }) {
+export default function UploadScreen({ mode, language, setLanguage, onResults, onBack, usage, onPaywall }) {
   const [file, setFile] = useState(null);
   const [textInput, setTextInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -36,6 +36,7 @@ export default function UploadScreen({ mode, language, setLanguage, onResults, o
   });
 
   const handleAnalyse = async () => {
+    if (usage && usage.isLimitHit) { onPaywall(); return; }
     setError('');
     setLoading(true);
 
@@ -67,6 +68,8 @@ export default function UploadScreen({ mode, language, setLanguage, onResults, o
       const code = err.response?.data?.error;
       if (code === 'PARSE_ERROR') {
         setError('Hum is report ko samajh nahi paaye — kya aap values manually type kar sakte hain?');
+      } else if (code === 'PDF_TOO_LONG') {
+        setError(err.response?.data?.message || 'PDF 3 pages se zyada hai. Chhota PDF upload karein.');
       } else if (code === 'UNSUPPORTED_FILE_TYPE') {
         setError('Sirf JPG, PNG, ya PDF upload karein.');
       } else if (code === 'FILE_TOO_LARGE') {
@@ -238,6 +241,14 @@ export default function UploadScreen({ mode, language, setLanguage, onResults, o
         {loading && (
           <p className="text-center text-sm text-gray-400 mt-3">
             AI aapki report padh raha hai... thoda wait karein
+          </p>
+        )}
+
+        {usage && !usage.paid && (
+          <p className="text-center text-xs text-gray-400 mt-3">
+            {usage.remaining > 0
+              ? `${usage.remaining} free ${usage.remaining === 1 ? 'analysis' : 'analyses'} remaining`
+              : 'Free limit reached — unlock for ₹99'}
           </p>
         )}
       </div>
